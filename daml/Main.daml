@@ -1,0 +1,190 @@
+module Main where
+
+import DA.Optional
+import DA.Date
+import DA.List
+
+
+type OrderRequestId = ContractId OrderRequest
+type OrderQuoteId = ContractId OrderQuote
+
+
+data Instrument = Instrument with
+  instrumentName: Text
+  instrumentModel: Text
+    deriving (Eq, Show)
+
+
+template OrderRequest
+  with
+    customer: Party
+    store: Party
+
+    code: Text 
+    requestDate: Date
+    instruments: [Instrument]
+    status: Text
+    note: Optional (Text)
+  where
+    signatory customer, store
+    ensure not (null instruments) 
+
+    key (store, customer, code) : (Party, Party, Text)
+    maintainer key._1
+
+    -- customer can create order requests
+    nonconsuming choice CreateOrderRequest: OrderRequestId
+      with
+        orderCustomer: Party
+        orderStore: Party
+
+        orderCode: Text
+        orderRequestDate: Date
+        orderInstruments: [Instrument]
+        orderNote: Optional (Text)
+      controller customer
+      do
+        create OrderRequest
+          with
+            customer = orderCustomer
+            store = orderStore
+
+            code = orderCode
+            requestDate = orderRequestDate
+            instruments = orderInstruments
+            status = "New"
+            note = orderNote
+
+    -- customer can cancel order requests
+    choice CancelOrderRequest: OrderRequestId
+      with
+        note: Optional (Text)
+      controller customer
+        do
+          create this with
+            note = note
+            status = "Canceled"
+
+    -- customer can update the list of instruments of order requests
+    choice UpdateOrderRequestInstruments: OrderRequestId
+      with
+        newInstruments: [Instrument]
+      controller customer
+      do
+        create this with
+          instruments = newInstruments
+
+    -- store can reject order requests
+    choice RejectOrderRequest: OrderRequestId
+      with
+        note: Optional (Text)
+      controller store
+      do
+        create this with
+          note = note
+          status = "Rejected"
+        
+
+    -- store can accept order requests
+    -- this will create a order quote
+    choice AceptedOrderAndQuote: ContractId OrderQuote
+      with
+        cost: Decimal
+        deliveryDate: Date
+        note: Optional (Text)
+      controller store
+      do
+        -- 
+        assertMsg "Assertion failure: Delivery date cannot be prior to request date." (deliveryDate > requestDate)
+        assertMsg "Assertion failure: Cost cannot be a negative value." (cost > 0.0)
+        assertMsg "Assertion failure: Order must be new to be quoted" (status == "New")
+
+        -- create a quote contract
+        newQuote <- create OrderQuote with
+          customer
+          store
+          code
+          cost
+          deliveryDate
+          note
+          quoteStatus = "Pending"
+        
+        -- update existing order
+        create this with
+          status = "Accepted"
+
+        -- return the created quote
+        return newQuote
+
+template OrderQuote
+  with
+    customer: Party
+    store: Party
+
+    code: Text
+    cost: Decimal
+    deliveryDate: Date
+    quoteStatus: Text
+    note: Optional (Text)     
+
+  where
+    signatory store
+    observer customer
+
+    key (store, customer, code): (Party, Party, Text)
+    maintainer key._1
+
+    -- customer can accept the quote
+    choice AceptOrderQuote: OrderQuoteId
+      with
+        acceptionNote: Optional (Text)
+      controller customer
+      do
+        create this with
+          note = acceptionNote
+          quoteStatus = "Accepted"
+
+    -- customer can reject the quote
+    choice RejectOrderQuote: OrderQuoteId
+      with
+        rejectionNote: Optional (Text)
+      controller customer
+      do
+        create this with
+          note = rejectionNote
+          quoteStatus = "Rejected"
+
+    -- store can mark quote as completed
+    choice CompleteOrderQuote: OrderQuoteId
+      with
+        completionNote: Optional (Text)
+      controller store
+      do
+        --
+        assertMsg "Assertion failure: Can only complete accepted quotes." (quoteStatus == "Accepted")
+
+        create this with
+          note = completionNote
+          quoteStatus = "Complete"
+
+    -- store can check quotes
+    nonconsuming choice CheckQuotes: (Either ([Text]) (Text))
+      with
+        quotes: [(ContractId OrderQuote, OrderQuote)]
+      controller store
+      do
+        if null quotes then
+          return (Right "No Quotes found")
+        else do
+          return (Left $ map(\quote -> "Code: " <> code <> " Status: " <> quoteStatus) quotes)
+
+
+
+
+
+
+
+      
+
+
+

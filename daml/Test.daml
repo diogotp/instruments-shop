@@ -1,0 +1,177 @@
+module Test where
+
+import Main
+import Setup
+import Daml.Script
+import DA.Date
+
+{-
+    Scenario 1:
+    1. customer creates order request
+    2. customer updates instrument list
+    3. store accepts order request and creates quote
+    4. customer accepts quote
+    5. store marks quote as completed
+    6. store checks quotes
+-}
+testScenario1 : Script (Either ([Text]) (Text))
+testScenario1 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- alice creates a new order request
+    testOrder <- submitMulti [alice, store] [] do
+        createCmd OrderRequest with
+            customer = alice
+            store = store
+            code = "test order new"
+            requestDate = date 2024 Jan 02
+            instruments = [instrument01, instrument02]
+            status = "New"
+            note = Some "Main happy path"
+
+    -- alice updates the order with new instruments
+    newTestOrder <- submit alice do
+        exerciseCmd testOrder UpdateOrderRequestInstruments with
+            newInstruments = [instrument03, instrument03, instrument03, instrument03]
+
+    -- store acepts order and creates an order quote
+    quote <- submit store do
+        exerciseCmd newTestOrder AceptedOrderAndQuote with 
+            cost = 10.0
+            deliveryDate = date 2024 Jan 15
+            note = Some "Pending"
+
+    -- alice acepts order quote
+    acceptedQuote <- submit alice do
+        exerciseCmd quote AceptOrderQuote with
+            acceptionNote = None
+
+
+    -- store marks order quote as completed
+    completedQuote <- submit store do
+        exerciseCmd acceptedQuote CompleteOrderQuote with
+            completionNote = None
+
+    -- store checks quotes
+    queryQuotes <- query @OrderQuote store
+
+    debug $ queryQuotes
+
+    checkQuotes <- submit store do
+        exerciseCmd completedQuote CheckQuotes with
+            quotes = queryQuotes   
+
+
+    return(checkQuotes)
+
+{-
+    Scenario 2:
+    1. customer creates order request
+    2. customer cancels order request
+-}
+testScenario2 : Script ()
+testScenario2 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- alice cancels test order 2
+    submit alice do
+        exerciseCmd testOrder2 CancelOrderRequest with
+            note = Some "Canceled by Alice"
+
+    return()
+
+
+{-
+    Scenario 3:
+    1. customer creates order request
+    2. store accepts order request and creates quote
+    3. customer rejects quote
+-}
+testScenario3 : Script ()
+testScenario3 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- store accepts test order 3
+    quote <- submit store do
+        exerciseCmd testOrder3 AceptedOrderAndQuote with 
+            cost = 10000.0
+            deliveryDate = date 2024 Dec 15
+            note = Some "Pending"
+
+    -- bob rejects the quote
+    submit bob do
+        exerciseCmd quote RejectOrderQuote with
+            rejectionNote = Some "Price too high"
+
+    return()
+
+
+{-
+    Scenario 4:
+    1. customer creates order request
+    2. store rejects order request
+-}
+testScenario4 : Script ()
+testScenario4 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- store rejects test order 3
+    submit store do
+        exerciseCmd testOrder3 RejectOrderRequest with 
+            note = None
+
+    return()
+
+--Unhappy paths
+
+-- 1. store cannot create a quote with delivery date before the order request date
+testUnhappy1 : Script ()
+testUnhappy1 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- store tries create a quote with invalid date
+    quote <- submitMustFail store do
+        exerciseCmd testOrder1 AceptedOrderAndQuote with 
+            cost = 10.0
+            deliveryDate = date 1999 Jan 15
+            note = Some "This submit should fail"
+
+    return()
+
+-- 2. quote cost cannot be negative
+unhappy2 : Script ()
+unhappy2 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- store tries to create a quote with negative cost
+    quote <- submitMustFail store do
+        exerciseCmd testOrder1 AceptedOrderAndQuote with 
+            cost = -10.0
+            deliveryDate = date 2024 Jan 15
+            note = None
+
+    return()
+
+-- 3. store can only complete quotes that have been accepted
+unhappy3 : Script ()
+unhappy3 = script do
+    (testParties@TestParties{..}, testInstruments@TestInstruments{..}, testOrder1, testOrder2, testOrder3) <- setupTestOrders
+
+    -- store will accept test order 1 and issue a quote
+    quote <- submit store do
+        exerciseCmd testOrder1 AceptedOrderAndQuote with 
+            cost = 10.0
+            deliveryDate = date 2024 Jan 15
+            note = None
+
+    -- customer will reject quote
+    newQuote <- submit alice do
+        exerciseCmd quote RejectOrderQuote with
+            rejectionNote = Some "Price too high"
+
+    -- store will accept order and issue a quote
+    submitMustFail store do
+        exerciseCmd newQuote CompleteOrderQuote with 
+            completionNote = Some "First Issue"
+
+    return()

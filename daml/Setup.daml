@@ -1,0 +1,144 @@
+module Setup where
+
+import Main
+import DA.Date
+import Daml.Script
+
+-- Parties
+data TestParties = TestParties with
+    store: Party
+    alice: Party
+    bob: Party
+
+setupTestParties = script do
+ -- 1. allocate parties with the given display name
+    store <- allocatePartyWithHint "Store" (PartyIdHint "STR")
+    alice <- allocatePartyWithHint "Alice" (PartyIdHint "ALC")
+    bob <- allocatePartyWithHint "Bob" (PartyIdHint "BOB")
+
+    return TestParties with
+        store
+        alice
+        bob
+
+setupUsers = script do
+    (testParties@TestParties{..}) <- setupTestParties
+
+    
+    -- 2. construct user-ids from text
+    storeId <- validateUserId "Store"
+    aliceId <- validateUserId "Alice"
+    bobId <- validateUserId "Bob"
+
+    -- 3. create users with the given rights
+    createUser (User storeId (Some store)) [CanActAs store]
+    createUser (User aliceId (Some alice)) [CanActAs alice]
+    createUser (User bobId (Some bob)) [CanActAs bob]
+
+     -- Instruments
+    let
+        instrument01 = Instrument with
+            instrumentName = "Guitar"
+            instrumentModel = "A"
+
+        instrument02 = Instrument with
+            instrumentName = "Guitar"
+            instrumentModel = "B"
+
+        instrument03 = Instrument with
+            instrumentName = "Violin"
+            instrumentModel = "A"
+
+    -- Test Orders
+    testOrder1 <- submitMulti [alice, store] [] do
+        createCmd OrderRequest with
+            customer = alice
+            store = store
+            code = "test order 1"
+            requestDate = date 2024 Jan 01
+            instruments = [instrument01, instrument02]
+            status= "New"
+            note = None
+
+    testOrder2 <- submitMulti [alice, store] [] do
+        createCmd OrderRequest with
+            customer = alice
+            store = store
+            code = "test order 2"
+            requestDate = date 2024 Jan 01
+            instruments = [instrument01, instrument02]
+            status = "New"
+            note = Some "N/A"
+
+    testOrder3 <- submitMulti [bob, store] [] do
+        createCmd OrderRequest with
+            customer = bob
+            store = store
+            code = "test order 3"
+            requestDate = date 2024 Jun 01
+            instruments = [instrument01, instrument02, instrument03]
+            status = "New"
+            note = None
+
+    return(testParties, TestInstruments with {instrument01, instrument02, instrument03}, testOrder1, testOrder2, testOrder3)
+    
+data TestInstruments = TestInstruments with
+    instrument01: Instrument
+    instrument02: Instrument
+    instrument03: Instrument
+
+setupTestOrders = script do
+    (testParties@TestParties{..}) <- setupTestParties
+
+
+    -- Instruments
+    let
+        instrument01 = Instrument with
+            instrumentName = "Guitar"
+            instrumentModel = "A"
+
+        instrument02 = Instrument with
+            instrumentName = "Guitar"
+            instrumentModel = "B"
+
+        instrument03 = Instrument with
+            instrumentName = "Violin"
+            instrumentModel = "A"
+
+    -- Test Orders
+    testOrder1 <- submitMulti [alice, store] [] do
+        createCmd OrderRequest with
+            customer = alice
+            store = store
+            code = "test order 1"
+            requestDate = date 2024 Jan 01
+            instruments = [instrument01, instrument02]
+            status= "New"
+            note = None
+
+    testOrder2 <- submitMulti [alice, store] [] do
+        createCmd OrderRequest with
+            customer = alice
+            store = store
+            code = "test order 2"
+            requestDate = date 2024 Jan 01
+            instruments = [instrument01, instrument02]
+            status = "New"
+            note = Some "N/A"
+
+    testOrder3 <- submitMulti [bob, store] [] do
+        createCmd OrderRequest with
+            customer = bob
+            store = store
+            code = "test order 3"
+            requestDate = date 2024 Jun 01
+            instruments = [instrument01, instrument02, instrument03]
+            status = "New"
+            note = None
+
+
+    return(testParties, TestInstruments with {instrument01, instrument02, instrument03}, testOrder1, testOrder2, testOrder3)
+
+
+
+    
